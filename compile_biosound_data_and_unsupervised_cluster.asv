@@ -27,7 +27,7 @@ compiled_data = get_compiled_data(processed_log, data_root_path);
 deaf_or_control = get_deaf_or_control(compiled_data.batIDs);
 
 % Change boolean to do analysis on all or subsets of data
-do_male_and_female = 1;
+do_male_and_female = 0;
 do_male_only = 1;
 do_female_only = 1;
 
@@ -46,25 +46,22 @@ if do_male_only
     data_piezo = compiled_data.piezo_matrix(deaf_or_control.male_bool,:);
     data_raw = compiled_data.raw_matrix(deaf_or_control.male_bool,:);
     %keyboard()
-    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(data_piezo, "Piezo, Male Only");
-    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(data_raw, "Raw, Male Only");
+    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(data_piezo, "Piezo");
+    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(data_raw, "Raw");
 
     % Project matrix to lower-dim PCA space. 
-    do_pca_and_project_data_onto_top_PCs(data_piezo, coeff, deaf_or_control.male_only, "Piezo, Male Only")
-    do_pca_and_project_data_onto_top_PCs(data_raw, coeff2, deaf_or_control.male_only, "Raw, Male Only")
+    do_pca_and_project_data_onto_top_PCs(compiled_data.piezo_matrix, coeff, deaf_or_control.male_only, "Piezo, Male Only")
+    do_pca_and_project_data_onto_top_PCs(compiled_data.raw_matrix, coeff2, deaf_or_control.male_only, "Raw, Male Only")
 end
 
 if do_female_only
     % Reduce space using PCA so that we can visualize the data
-    data_piezo = compiled_data.piezo_matrix(deaf_or_control.female_bool,:);
-    data_raw = compiled_data.raw_matrix(deaf_or_control.female_bool,:);
-    %keyboard()
-    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(data_piezo, "Piezo, Female Only");
-    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(data_raw, "Raw, Female Only");
+    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(compiled_data.piezo_matrix, "Piezo");
+    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(compiled_data.raw_matrix, "Raw");
 
     % Project matrix to lower-dim PCA space. 
-    do_pca_and_project_data_onto_top_PCs(data_piezo, coeff, deaf_or_control.female_only, "Piezo, Female Only")
-    do_pca_and_project_data_onto_top_PCs(data_raw, coeff2, deaf_or_control.female_only, "Raw, Female Only")
+    do_pca_and_project_data_onto_top_PCs(compiled_data.piezo_matrix, coeff, deaf_or_control.female_only, "Piezo, Female Only")
+    do_pca_and_project_data_onto_top_PCs(compiled_data.raw_matrix, coeff2, deaf_or_control.female_only, "Raw, Female Only")
 end
 %% Perform supervised classification
 
@@ -144,7 +141,7 @@ function do_pca_and_project_data_onto_top_PCs(X, coeff, deaf_or_control, title_a
     data_projected_onto_PCA = X*coeff(:,1:2); % Project data onto PCA coeffs
 
     % Fit Gaussian mixture model
-    GMModel = fitgmdist(data_projected_onto_PCA, 2, 'Replicates',10);
+    GMModel = fitgmdist(data_projected_onto_PCA, 2);
 
     % Show gaussian contour scatterplot
     figure
