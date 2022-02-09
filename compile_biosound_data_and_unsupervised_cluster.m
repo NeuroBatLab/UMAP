@@ -1,12 +1,13 @@
-% Script summary: this script performs supervised classification on the Saline vs. Deaf
-% acoustic dataset, which has already been processed by the BioSound
-% pipeline.
-%
-% This script has two main parts
-%   1) Data compilation. The data need to be loaded from the server and
-%   organized into a single struct
-%   2) Classification. Once the data are organized we perform
-%   classification
+% Notebook summary: this notebook is divided into parts.
+% 1) The first part grabs the data and organizes bioSound struct into a
+% matrix.
+% 2) The second part performs PCA on the bioSound Matrix to find components
+% that explain the most variance.
+% 3) The third part projects the bioSound matrix onto the principle components
+% and then performs gaussian mixture modeling to find unsupervised
+% clusters. We then color-code by Deaf vs Control group to see if the
+% clusters correspond to treatment. 
+% 4) The fourth part tries to find the 
 %
 % Script author: Alvince Pongos, alvince_pongos@berkeley.edu
 
@@ -28,13 +29,13 @@ deaf_or_control = get_deaf_or_control(compiled_data.batIDs);
 
 % Change boolean to do analysis on all or subsets of data
 do_male_and_female = 1;
-do_male_only = 1;
-do_female_only = 1;
+do_male_only = 0;
+do_female_only = 0;
 
 if do_male_and_female
     % Reduce space using PCA so that we can visualize the data
-    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(compiled_data.piezo_matrix, "Piezo");
-    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(compiled_data.raw_matrix, "Raw");
+    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(compiled_data.piezo_matrix, "Piezo, Male and Female");
+    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(compiled_data.raw_matrix, "Raw, Male and Female");
 
     % Project matrix to lower-dim PCA space. 
     do_pca_and_project_data_onto_top_PCs(compiled_data.piezo_matrix, coeff, deaf_or_control.male_and_female, "Piezo, Male and Female")
@@ -43,33 +44,211 @@ end
 
 if do_male_only
     % Reduce space using PCA so that we can visualize the data
-    data_piezo = compiled_data.piezo_matrix(deaf_or_control.male_bool,:);
-    data_raw = compiled_data.raw_matrix(deaf_or_control.male_bool,:);
+    data_piezo_mo = compiled_data.piezo_matrix(deaf_or_control.male_bool,:);
+    data_raw_mo = compiled_data.raw_matrix(deaf_or_control.male_bool,:);
     %keyboard()
-    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(data_piezo, "Piezo, Male Only");
-    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(data_raw, "Raw, Male Only");
+    [coeff_mo,score_mo,latent_mo,tsquared_mo,explained_mo] = plot_pca_variance_explained(data_piezo_mo, "Piezo, Male Only");
+    [coeff2_mo,score2_mo,latent2_mo,tsquared2_mo,explained2_mo] = plot_pca_variance_explained(data_raw_mo, "Raw, Male Only");
 
     % Project matrix to lower-dim PCA space. 
-    do_pca_and_project_data_onto_top_PCs(data_piezo, coeff, deaf_or_control.male_only, "Piezo, Male Only")
-    do_pca_and_project_data_onto_top_PCs(data_raw, coeff2, deaf_or_control.male_only, "Raw, Male Only")
+    PCA_GMM_struct_mo = do_pca_and_project_data_onto_top_PCs(data_piezo_mo, coeff_mo, deaf_or_control.male_only, "Piezo, Male Only");
+    PCA_GMM_struct2_mo = do_pca_and_project_data_onto_top_PCs(data_raw_mo, coeff2_mo, deaf_or_control.male_only, "Raw, Male Only");
+    
+    % This showed interesting clusters, Look into the weights
+    [sorted_coeffs_mo, sorted_idx_matrix_mo] = sort(coeff_mo, 'descend');
+    bioSound_labels = get_bioSound_labels_from_indices(sorted_idx_matrix_mo);    
 end
 
 if do_female_only
     % Reduce space using PCA so that we can visualize the data
-    data_piezo = compiled_data.piezo_matrix(deaf_or_control.female_bool,:);
-    data_raw = compiled_data.raw_matrix(deaf_or_control.female_bool,:);
+    data_piezo_fe = compiled_data.piezo_matrix(deaf_or_control.female_bool,:);
+    data_raw_fe = compiled_data.raw_matrix(deaf_or_control.female_bool,:);
     %keyboard()
-    [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(data_piezo, "Piezo, Female Only");
-    [coeff2,score2,latent2,tsquared2,explained2] = plot_pca_variance_explained(data_raw, "Raw, Female Only");
+    [coeff_fe,score_fe,latent_fe,tsquared_fe,explained_fe] = plot_pca_variance_explained(data_piezo_fe, "Piezo, Female Only");
+    [coeff2_fe,score2_fe,latent2_fe,tsquared2_fe,explained2_fe] = plot_pca_variance_explained(data_raw_fe, "Raw, Female Only");
 
     % Project matrix to lower-dim PCA space. 
-    do_pca_and_project_data_onto_top_PCs(data_piezo, coeff, deaf_or_control.female_only, "Piezo, Female Only")
-    do_pca_and_project_data_onto_top_PCs(data_raw, coeff2, deaf_or_control.female_only, "Raw, Female Only")
+    do_pca_and_project_data_onto_top_PCs(data_piezo_fe, coeff_fe, deaf_or_control.female_only, "Piezo, Female Only")
+    do_pca_and_project_data_onto_top_PCs(data_raw_fe, coeff2_fe, deaf_or_control.female_only, "Raw, Female Only")
 end
-%% Perform supervised classification
+
+%% Investigate spectrograms, and histogram of features near mean of clusters
+% Find points closest to cluster means
+[sorted_distances, sorted_idx, sorted_element_IDs] = find_points_closest_to_cluster_means(PCA_GMM_struct_mo, compiled_data, deaf_or_control, 'Males_only');
+
+% Using the sorted distances and sorted idx, return the spectrogram. This
+% function saves the spectrograms too
+grab_spectrograms(sorted_element_IDs)
+
+%% Fit and compare Linear Mixed Effect Models
+% Make table from data sources
+tbl = make_table_from_matrices(compiled_data.piezo_matrix, compiled_data.batIDs, deaf_or_control.male_and_female, score);
+
+% Do LMEMs
+lme_sex_deaf_interaction = fitlme(tbl, "PCScore~sex*Deaf_or_Control+(1|BatID)");
+lme_sex_deaf_no_interaction = fitlme(tbl, "PCScore~sex+Deaf_or_Control+(1|BatID)");
+lme_sex = fitlme(tbl, "PCScore~sex+(1|BatID)");
+lme_deaf = fitlme(tbl, "PCScore~Deaf_or_Control+(1|BatID)");
+
+% Compare LMEMs
+test_deaf_to_sexPlusdeaf = compare(lme_sex, lme_sex_deaf_no_interaction);
+test_sex_to_sexPlusdeaf = compare(lme_deaf, lme_sex_deaf_no_interaction);
+test_interaction_to_noInteraction = compare(lme_sex_deaf_no_interaction, lme_sex_deaf_interaction);
+
+% Do additional tests
+lme_sex_deaf_entropytime = fitlme(tbl, "PCScore~sex+Deaf_or_Control+entropytime+(1|BatID)");
+lme_sex_deaf_entropytime_stdtime = fitlme(tbl, "PCScore~sex+Deaf_or_Control+entropytime+stdtime+(1|BatID)");
+lme_sex_entropytime = fitlme(tbl, "PCScore~sex+entropytime+(1|BatID)");
+lme_deaf_entropytime = fitlme(tbl, "PCScore~Deaf_or_Control+entropytime+(1|BatID)");
+
+% Compare LMEMs
+test_deaf_to_sexPlusdeafPlusentropytime  = compare(lme_sex_entropytime, lme_sex_deaf_entropytime);
+test_sex_to_sexPlusdeafPlusentropytime  = compare(lme_deaf_entropytime, lme_sex_deaf_entropytime);
+test_entropytime_to_baseline = compare(lme_sex_deaf_no_interaction, lme_sex_deaf_entropytime);
+test_stdtime_to_entropytime_and_baseline = compare(lme_sex_deaf_no_interaction, lme_sex_deaf_entropytime);
 
 
-%% Unsupervised classification
+%% Make histograms of all of the biosound features in the male-only, female-only 
+% run linear mixed effects model and control for identity
+make_histogram_bioSound_features(data_piezo_mo, deaf_or_control.male_only, "Piezo, Male Only")
+make_histogram_bioSound_features(data_piezo_fe, deaf_or_control.female_only, "Piezo, Female Only")
+
+
+%% Helper functions for doing Linear Mixed Effect Models
+function tbl = make_table_from_matrices(main_data, BatIDs, Deaf_or_not, PCScores)
+    % Turn the matrix into a table
+    tbl = array2table(main_data);
+    
+    % Name the table variables
+    PAF = list_of_predefined_acoustical_features();
+    PAF_plus_these = horzcat(PAF,{'Pk2', 'second_V', 'meanF0'});    % Recall that some of the variables were post-calculated, include these
+    tbl.Properties.VariableNames = PAF_plus_these;
+    
+    % Add the identifiers such as BatID, Sex, and Deaf
+    %keyboard()
+    tbl.BatID = categorical(vertcat(BatIDs{:}));
+    tbl.Deaf_or_Control = categorical(Deaf_or_not);
+    tbl.sex = categorical(get_bat_sex_cells(BatIDs)');
+    tbl.PCScore = PCScores(:,1);
+    
+end
+
+%% Helper functions for the historgrams
+function make_histogram_bioSound_features(data, deaf_or_control, title_affix)
+    % Make histograms for each feature, compare deaf and control in same
+    % plot
+    
+    % Get bioSound dictionary for feature labels
+    bioSound_dict = get_bioSound_dict();
+    
+    % Plot each feature
+    for i=1:width(data)
+        deaf_data = data(deaf_or_control,i);
+        control_data = data(~deaf_or_control,i);
+        
+        feature = bioSound_dict(i);
+        figure
+        hold on
+        h1 = histogram(deaf_data);
+        h2 = histogram(control_data);
+        [p, h, stats] = ranksum(deaf_data, control_data);
+        f_title = {"Histogram of feature " + feature, 'Wilcox-test pvalue: ' + string(p), title_affix};
+        title(f_title);
+        
+        legend({'deaf','control'})
+        
+        % Save image
+        save_as = strcat("Histogram_of_" + feature, '_pvalue_' + string(p), title_affix, '.jpg');
+        file_save_path = fullfile( 'C:\Users\tobias\Documents\Alvince\DeafSalineGroup151_subset', save_as );
+        saveas(gcf, file_save_path)
+        hold off
+        %keyboard()
+    end
+end
+
+%% Helper functions to find features near mean of clusters and plotting histograms
+function [sorted_distances, sorted_idx, sorted_element_IDs] = find_points_closest_to_cluster_means(PCA_GMM_struct,compiled_data, deaf_or_control, which_group)
+% This function iterates through each cluster mean (usually only the top 
+% two principle components) and finds which data points are closest to those
+% means. Then, this function returns the sorted distances, sorted indices of those
+% points, and the sorted element_IDs which are strings that can be used to
+% grab spectrogram data.
+
+    % Grab cluster means
+    cluster_means = PCA_GMM_struct.GMModel.mu;
+    data_projected_onto_PCs = PCA_GMM_struct.data_projected_onto_PCs;
+    % For each cluster mean
+    for i=1:height(cluster_means)
+        % Find the euclidean distance of each point.
+        distances(:,i) = sqrt((cluster_means(i,1)-data_projected_onto_PCs(:,1)).^2 + (cluster_means(i,2)-data_projected_onto_PCs(:,2)).^2);
+    end
+    
+    % Sort descending
+    [sorted_distances, sorted_idx] = sort(distances);    
+    
+    % Sort element IDs, these IDs are the string patterns to grab already
+    % processed spectogram
+    if strcmp(which_group , 'Males_only')
+        %keyboard()
+        males_only_ids = compiled_data.elementIDs(deaf_or_control.male_bool);
+        sorted_element_IDs = males_only_ids(sorted_idx);
+    end
+end
+
+function images = PDFtoImg(pdfFile, save_as)
+    import org.apache.pdfbox.*
+    import java.io.*
+    filename = fullfile(pdfFile);
+    jFile = File(filename);
+    document = pdmodel.PDDocument.load(jFile);
+    pdfRenderer = rendering.PDFRenderer(document);
+    count = document.getNumberOfPages();
+    images = [];
+    for ii = 1:count
+        bim = pdfRenderer.renderImageWithDPI(ii-1, 300, rendering.ImageType.RGB);
+        images = [images (filename + "-" +"Page" + ii + ".png")];
+        tools.imageio.ImageIOUtil.writeImage(bim, save_as, 300);
+    end
+    document.close()
+end
+
+function grab_spectrograms(sorted_element_IDs) 
+    path_to_data = 'Y:\users\JulieE\DeafSalineGroup151\';
+    vocExtracts_affix = 'audiologgers\VocExtracts';
+   
+    % Iterate over the two PCs
+    for i=1:width(sorted_element_IDs)
+        % Grab only the top 5 spectrograms closest to the cluster means
+        for j = 1:5 %width(sorted_element_IDs)
+            %keyboard
+            subdir = strcat('20', extractBetween(sorted_element_IDs(j,i), 'DeSa_', '_') );
+            subdir = strrep(subdir, '_Raw', '_Piezo');
+            spectrogram_file_name = strcat(sorted_element_IDs(j,i), '.pdf');
+            spectrogram_file_name = strrep(spectrogram_file_name, '_Raw', '_Piezo');
+            spectrogram_file_path = fullfile(path_to_data,subdir,vocExtracts_affix,spectrogram_file_name);
+            
+            % Also grab the wav file
+            wav_file_path = strrep(spectrogram_file_path,'.pdf','.wav');
+            %open(spectrogram_file_path{1});
+            
+            % Save file
+            save_as = strcat('Top ', string(j) ,' datapoint closest to cluster ', string(i), '.jpg');
+            file_save_path = fullfile( 'C:\Users\tobias\Documents\Alvince\DeafSalineGroup151_subset', save_as );
+            wave_wav_as = strrep(file_save_path, '.jpg','.wav');
+            %keyboard
+            try
+                PDFtoImg(spectrogram_file_path{1}, file_save_path);
+                %keyboard
+                % Copy over wav file
+                copyfile(wav_file_path{1}, wave_wav_as)
+            catch
+                keyboard
+            end
+            
+        end
+    end
+    
+end
 
 %% General helper functions
 function BatLabels = get_bat_labels()
@@ -82,9 +261,26 @@ function BatLabels = get_bat_labels()
     BatLabels.name_F_or_M_dict = containers.Map(BatLabels.name, BatLabels.sex);
 end
 
+function bat_sex_cells = get_bat_sex_cells(Bat_IDs)
+    BatLabels = get_bat_labels();
+    bat_sex_cells = {};
+    
+    for i=1:length(Bat_IDs)
+        %keyboard()
+        bat_sex_cells{i} = BatLabels.name_F_or_M_dict(Bat_IDs{i}{1});
+    end
+    
+end
+
 function deaf_or_control_struct = get_deaf_or_control(batIDs)
     % This function returns boolean arrays so that when doing clustering we
     % can group the data and control for variables like gender
+    % Output labels
+    %   male_and_female: boolean 1=deaf, 0=control
+    %   male_only: boolean 1=deaf, 0=control
+    %   female_only: boolean 1=deaf, 0=control
+    %   male_bool: boolean 1=male, 0=female
+    %   female_bool: boolean 1=female, 0=male
     BatLabels = get_bat_labels();
     deaf_or_control_struct.male_and_female = false(length(batIDs),1);
     deaf_or_control_struct.male_and_female_bool = true(length(batIDs),1);
@@ -120,6 +316,29 @@ function deaf_or_control_struct = get_deaf_or_control(batIDs)
     %keyboard()
 end
 
+function bioSound_dict = get_bioSound_dict()
+% This function returns a dictionary of bioSound indices mapped to their
+% feature names
+PAF = list_of_predefined_acoustical_features();
+PAF_plus_these = horzcat(PAF,{'Pk2', 'second_V', 'meanF0'}); % This order was gotten from get_predefined_acoustical_features(BioSoundCalls)
+
+%keyboard()
+bioSound_dict = containers.Map(1:length(PAF_plus_these), PAF_plus_these);
+end
+
+function bioSound_labels = get_bioSound_labels_from_indices(idx_matrix)
+    % This function accepts idx matrix (Integers) of bioSound and returns the appropriate
+    % bioSound labels (strings)
+    bioSound_dict = get_bioSound_dict();
+    bioSound_labels = cell(size(idx_matrix));
+
+    % Relabel each element in cell
+    for i=1:length(idx_matrix)
+        idx_bool = idx_matrix == i;
+        [bioSound_labels{idx_bool}] = deal(bioSound_dict(i));
+    end
+
+end
 
 %% Helper functions for unsupervised clustering and plotting
 function [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(X, title_affix)
@@ -128,6 +347,7 @@ function [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(X
     figure
     hold on
     bar(explained)
+    %keyboard()
     plot(1:numel(explained), cumsum(explained), 'o-', 'MarkerFaceColor', 'r')
     yyaxis right
     h = gca;
@@ -137,10 +357,15 @@ function [coeff,score,latent,tsquared,explained] = plot_pca_variance_explained(X
     xlabel('Number of Principle Components')
     ylabel('Variance Explained')
     title(['Number of Principle Components and Variance Explained of Predefomed Acoustic Features: ' title_affix])
+    
+    % Save photo
+    %keyboard()
+    file_save_path = fullfile( 'C:\Users\tobias\Documents\Alvince\DeafSalineGroup151_subset', strcat('PCA_exp_', title_affix, '.jpg') );
+    saveas(gcf, file_save_path);
     hold off
 end
 
-function do_pca_and_project_data_onto_top_PCs(X, coeff, deaf_or_control, title_affix)
+function PCA_GMM_struct = do_pca_and_project_data_onto_top_PCs(X, coeff, deaf_or_control, title_affix)
     data_projected_onto_PCA = X*coeff(:,1:2); % Project data onto PCA coeffs
 
     % Fit Gaussian mixture model
@@ -158,7 +383,14 @@ function do_pca_and_project_data_onto_top_PCs(X, coeff, deaf_or_control, title_a
     legend(h,'Bat Group 1','Bat Group 2')
     xlabel('PC 1')
     ylabel('PC 2')
+    
+    % Save photo
+    file_save_path = fullfile( 'C:\Users\tobias\Documents\Alvince\DeafSalineGroup151_subset', strcat('Scatter', title_affix, '.jpg') );
+    saveas(gcf, file_save_path);
     hold off
+    
+    PCA_GMM_struct.data_projected_onto_PCs = data_projected_onto_PCA;
+    PCA_GMM_struct.GMModel = GMModel;
 end
 
 %% Helper functions for Data Compilation
@@ -261,7 +493,7 @@ function matrix_of_PAF = get_predefined_acoustical_features(BioSoundCalls)
    
 end
 
-function [matrix_raw, matrix_piezo, cell_of_IDs] = get_bioSound_data_as_matrix(loaded_200_file)
+function [matrix_raw, matrix_piezo, cell_of_IDs, cell_of_element_IDs] = get_bioSound_data_as_matrix(loaded_200_file)
     % This function grabs only the 1 x 1 numerical PAF data like in Julie's
     % 2016 Zebra Finch paper. 
     
@@ -269,6 +501,7 @@ function [matrix_raw, matrix_piezo, cell_of_IDs] = get_bioSound_data_as_matrix(l
     matrix_piezo = [];
     
     cell_of_IDs = {};
+    cell_of_element_IDs = {};
     
     recording_count = 1;
     % Append each BioSound output to output tables
@@ -287,6 +520,7 @@ function [matrix_raw, matrix_piezo, cell_of_IDs] = get_bioSound_data_as_matrix(l
             [filepath1,name1,ext1] = fileparts(loaded_200_file.BioSoundFilenames{i, 1});
             % Append to cell of IDs
             cell_of_IDs{i,1} = extractBetween(name1,"Bat","_");
+            cell_of_element_IDs{i,1} = name1;
         catch
             warning = 'Error no BioSoundFilename';
             keyboard()
@@ -374,17 +608,20 @@ function compiled_data = get_compiled_data(processed_log, data_root_path)
                 
                 % Only pass if struct not empty
                 if isstruct(loaded_200_file) 
-                    [raw_matrix_tmp, piezo_matrix_tmp, batIDs] = get_bioSound_data_as_matrix(loaded_200_file);
+                    [raw_matrix_tmp, piezo_matrix_tmp, batIDs, elementIDs] = get_bioSound_data_as_matrix(loaded_200_file);
 
                     % Append table to compiled table
                     if file_count == 1
                         compiled_data.raw_matrix = raw_matrix_tmp;
                         compiled_data.piezo_matrix = piezo_matrix_tmp;
                         compiled_data.batIDs = batIDs;
+                        compiled_data.elementIDs = elementIDs;
+                        
                     else
                         compiled_data.raw_matrix = [compiled_data.raw_matrix; raw_matrix_tmp];
                         compiled_data.piezo_matrix = [compiled_data.piezo_matrix; piezo_matrix_tmp];    
                         compiled_data.batIDs = [compiled_data.batIDs; batIDs];
+                        compiled_data.elementIDs = [compiled_data.elementIDs; elementIDs];
                     end
                     
                     % Debug if matrix and cells don't line up!
